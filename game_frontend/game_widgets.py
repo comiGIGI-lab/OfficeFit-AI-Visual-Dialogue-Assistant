@@ -49,17 +49,20 @@ class VideoWidget(QWidget):
         if self._frame is None:
             return
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        img_rgb = cv2.cvtColor(self._frame, cv2.COLOR_BGR2RGB)
-        h, w, ch = img_rgb.shape
-        bytes_per_line = ch * w
-        qimg = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(qimg).scaled(
-            self.width(), self.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        x = (self.width() - pixmap.width()) // 2
-        y = (self.height() - pixmap.height()) // 2
-        painter.drawPixmap(x, y, pixmap)
-        self._video_rect = (x, y, pixmap.width(), pixmap.height())
+        try:
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            img_rgb = cv2.cvtColor(self._frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = img_rgb.shape
+            bytes_per_line = ch * w
+            qimg = QImage(img_rgb.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimg).scaled(
+                self.width(), self.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            x = (self.width() - pixmap.width()) // 2
+            y = (self.height() - pixmap.height()) // 2
+            painter.drawPixmap(x, y, pixmap)
+            self._video_rect = (x, y, pixmap.width(), pixmap.height())
+        finally:
+            painter.end()
 
 
 # ---------- Loading 覆盖层 ----------
@@ -329,105 +332,108 @@ class CountdownOverlay(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
-        cx, cy = w // 2, h // 2
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            w, h = self.width(), self.height()
+            cx, cy = w // 2, h // 2
 
-        if self._mode == 'dynamic_hint':
-            title = getattr(self, '_hint_title', '')
-            subtitle = getattr(self, '_hint_subtitle', '')
-            color_name = getattr(self, '_hint_color', 'white')
-            color_map = {
-                "white": QColor(255, 255, 255),
-                "cyan": QColor(0, 212, 255),
-                "green": QColor(0, 255, 136),
-                "yellow": QColor(255, 200, 0),
-                "red": QColor(255, 80, 80),
-            }
-            c = color_map.get(color_name, QColor(255, 255, 255))
+            if self._mode == 'dynamic_hint':
+                title = getattr(self, '_hint_title', '')
+                subtitle = getattr(self, '_hint_subtitle', '')
+                color_name = getattr(self, '_hint_color', 'white')
+                color_map = {
+                    "white": QColor(255, 255, 255),
+                    "cyan": QColor(0, 212, 255),
+                    "green": QColor(0, 255, 136),
+                    "yellow": QColor(255, 200, 0),
+                    "red": QColor(255, 80, 80),
+                }
+                c = color_map.get(color_name, QColor(255, 255, 255))
 
-            title_font = QFont("Microsoft YaHei", 32, QFont.Bold)
-            painter.setFont(title_font)
-            painter.setPen(c)
-            painter.drawText(0, cy - 60, w, 60, Qt.AlignCenter, title)
+                title_font = QFont("Microsoft YaHei", 32, QFont.Bold)
+                painter.setFont(title_font)
+                painter.setPen(c)
+                painter.drawText(0, cy - 60, w, 60, Qt.AlignCenter, title)
 
-            if subtitle:
+                if subtitle:
+                    sub_font = QFont("Microsoft YaHei", 20, QFont.Bold)
+                    painter.setFont(sub_font)
+                    alpha = 200
+                    painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha))
+                    painter.drawText(0, cy + 10, w, 80, Qt.AlignCenter, subtitle)
+                return
+
+            if self._mode == 'ready_waiting':
+                alpha = int(180 + 75 * self._pulse)
+                hint_color = QColor(255, 255, 255, alpha)
+
+                hint_font = QFont("Microsoft YaHei", 28, QFont.Bold)
+                painter.setFont(hint_font)
+                painter.setPen(hint_color)
+                painter.drawText(0, cy - 70, w, 50, Qt.AlignCenter,
+                               "相机已就绪，请站到画面中央")
+
                 sub_font = QFont("Microsoft YaHei", 20, QFont.Bold)
                 painter.setFont(sub_font)
-                alpha = 200
-                painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha))
-                painter.drawText(0, cy + 10, w, 80, Qt.AlignCenter, subtitle)
-            return
+                painter.setPen(QColor(0, 212, 255, alpha))
+                painter.drawText(0, cy, w, 50, Qt.AlignCenter,
+                               "说「开始放松」或点击左侧模拟按钮")
+                return
 
-        if self._mode == 'ready_waiting':
-            alpha = int(180 + 75 * self._pulse)
-            hint_color = QColor(255, 255, 255, alpha)
+            if self._mode == 'waiting':
+                alpha = int(180 + 75 * self._pulse)
+                hint_color = QColor(255, 255, 255, alpha)
 
-            hint_font = QFont("Microsoft YaHei", 28, QFont.Bold)
-            painter.setFont(hint_font)
-            painter.setPen(hint_color)
-            painter.drawText(0, cy - 70, w, 50, Qt.AlignCenter,
-                           "相机已就绪，请站到画面中央")
+                # 提示文字
+                hint_font = QFont("Microsoft YaHei", 30, QFont.Bold)
+                painter.setFont(hint_font)
+                painter.setPen(hint_color)
+                painter.drawText(0, cy - 50, w, 100, Qt.AlignCenter, "准备开始放松")
+                return
 
-            sub_font = QFont("Microsoft YaHei", 20, QFont.Bold)
-            painter.setFont(sub_font)
-            painter.setPen(QColor(0, 212, 255, alpha))
-            painter.drawText(0, cy, w, 50, Qt.AlignCenter,
-                           "说「开始放松」或点击左侧模拟按钮")
-            return
+            if self._mode == 'countdown' and self._countdown > 0:
+                # 发光环
+                ring_max = min(w, h) * 0.35
+                r = int(ring_max * self._ring_radius)
+                if r > 8:
+                    if self._countdown >= 3:
+                        ring_color = QColor(0, 210, 255, 60)
+                    elif self._countdown == 2:
+                        ring_color = QColor(255, 200, 0, 80)
+                    else:
+                        ring_color = QColor(255, 60, 60, 100)
+                    painter.setPen(QPen(ring_color, 4))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawEllipse(cx - r, cy - r, r * 2, r * 2)
 
-        if self._mode == 'waiting':
-            alpha = int(180 + 75 * self._pulse)
-            hint_color = QColor(255, 255, 255, alpha)
+                # 提示文字
+                hint_font = QFont("Microsoft YaHei", 26, QFont.Bold)
+                painter.setFont(hint_font)
+                painter.setPen(QColor(255, 255, 255, 180))
+                painter.drawText(0, cy - 120, w, 50, Qt.AlignCenter, "已准备开始，请跟随引导进入放松训练")
 
-            # 提示文字
-            hint_font = QFont("Microsoft YaHei", 30, QFont.Bold)
-            painter.setFont(hint_font)
-            painter.setPen(hint_color)
-            painter.drawText(0, cy - 50, w, 100, Qt.AlignCenter, "准备开始训练")
-            return
-
-        if self._mode == 'countdown' and self._countdown > 0:
-            # 发光环
-            ring_max = min(w, h) * 0.35
-            r = int(ring_max * self._ring_radius)
-            if r > 8:
+                # 倒计时数字 (带发光)
+                num_font = QFont("Microsoft YaHei", self._font_size, QFont.Bold)
+                painter.setFont(num_font)
                 if self._countdown >= 3:
-                    ring_color = QColor(0, 210, 255, 60)
+                    color = QColor(255, 255, 255)
+                    glow = QColor(0, 210, 255, 60)
                 elif self._countdown == 2:
-                    ring_color = QColor(255, 200, 0, 80)
+                    color = QColor(255, 200, 0)
+                    glow = QColor(255, 200, 0, 80)
                 else:
-                    ring_color = QColor(255, 60, 60, 100)
-                painter.setPen(QPen(ring_color, 4))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(cx - r, cy - r, r * 2, r * 2)
-
-            # 提示文字
-            hint_font = QFont("Microsoft YaHei", 26, QFont.Bold)
-            painter.setFont(hint_font)
-            painter.setPen(QColor(255, 255, 255, 180))
-            painter.drawText(0, cy - 120, w, 50, Qt.AlignCenter, "已准备开始，请跟随引导进入放松训练")
-
-            # 倒计时数字 (带发光)
-            num_font = QFont("Microsoft YaHei", self._font_size, QFont.Bold)
-            painter.setFont(num_font)
-            if self._countdown >= 3:
-                color = QColor(255, 255, 255)
-                glow = QColor(0, 210, 255, 60)
-            elif self._countdown == 2:
-                color = QColor(255, 200, 0)
-                glow = QColor(255, 200, 0, 80)
-            else:
-                color = QColor(255, 60, 60)
-                glow = QColor(255, 60, 60, 100)
-            # 发光层
-            painter.setPen(QPen(glow, 12))
-            painter.drawText(0, cy - self._font_size // 2, w, self._font_size + 20,
-                           Qt.AlignCenter, str(self._countdown))
-            # 数字层
-            painter.setPen(color)
-            painter.drawText(0, cy - self._font_size // 2, w, self._font_size + 20,
-                           Qt.AlignCenter, str(self._countdown))
+                    color = QColor(255, 60, 60)
+                    glow = QColor(255, 60, 60, 100)
+                # 发光层
+                painter.setPen(QPen(glow, 12))
+                painter.drawText(0, cy - self._font_size // 2, w, self._font_size + 20,
+                               Qt.AlignCenter, str(self._countdown))
+                # 数字层
+                painter.setPen(color)
+                painter.drawText(0, cy - self._font_size // 2, w, self._font_size + 20,
+                               Qt.AlignCenter, str(self._countdown))
+        finally:
+            painter.end()
 
 
 # ---------- 飘字特效 ----------
@@ -506,22 +512,25 @@ class FloatTextWidget(QWidget):
         if not self._text:
             return
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        font = QFont("Microsoft YaHei", int(48 * self._scale), QFont.Bold)
-        painter.setFont(font)
-        c = self._color
-        alpha = int(255 * self._opacity)
-        # 发光层
-        painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha // 3))
-        rect = self.rect()
-        rect.translate(0, -self._offset_y - 2)
-        painter.drawText(rect, Qt.AlignCenter, self._text)
-        rect.translate(0, 4)
-        painter.drawText(rect, Qt.AlignCenter, self._text)
-        # 文字层
-        rect.translate(0, -2)
-        painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha))
-        painter.drawText(rect, Qt.AlignCenter, self._text)
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            font = QFont("Microsoft YaHei", int(48 * self._scale), QFont.Bold)
+            painter.setFont(font)
+            c = self._color
+            alpha = int(255 * self._opacity)
+            # 发光层
+            painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha // 3))
+            rect = self.rect()
+            rect.translate(0, -self._offset_y - 2)
+            painter.drawText(rect, Qt.AlignCenter, self._text)
+            rect.translate(0, 4)
+            painter.drawText(rect, Qt.AlignCenter, self._text)
+            # 文字层
+            rect.translate(0, -2)
+            painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha))
+            painter.drawText(rect, Qt.AlignCenter, self._text)
+        finally:
+            painter.end()
 
 
 # ---------- HUD 控件 ----------
@@ -543,25 +552,28 @@ class VolumeBar(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        w, h = self.width(), self.height()
+        try:
+            painter.setRenderHint(QPainter.Antialiasing)
+            w, h = self.width(), self.height()
 
-        # 背景
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(30, 30, 50))
-        painter.drawRoundedRect(0, 0, w, h, 3, 3)
+            # 背景
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(30, 30, 50))
+            painter.drawRoundedRect(0, 0, w, h, 3, 3)
 
-        # 音量条
-        if self._level > 0.01:
-            bar_w = int(w * self._level)
-            if self._level < 0.3:
-                c = QColor(0, 200, 100)    # 低音量绿
-            elif self._level < 0.6:
-                c = QColor(0, 255, 136)    # 中音量亮绿
-            else:
-                c = QColor(255, 200, 0)    # 高音量黄
-            painter.setBrush(c)
-            painter.drawRoundedRect(0, 0, bar_w, h, 3, 3)
+            # 音量条
+            if self._level > 0.01:
+                bar_w = int(w * self._level)
+                if self._level < 0.3:
+                    c = QColor(0, 200, 100)    # 低音量绿
+                elif self._level < 0.6:
+                    c = QColor(0, 255, 136)    # 中音量亮绿
+                else:
+                    c = QColor(255, 200, 0)    # 高音量黄
+                painter.setBrush(c)
+                painter.drawRoundedRect(0, 0, bar_w, h, 3, 3)
+        finally:
+            painter.end()
 
 
 # ── 动作目的与提示映射 ────────────────────────────────────
@@ -662,7 +674,6 @@ class ScorePanel(QWidget):
         layout.setSpacing(8)
 
         self._score_label = QLabel("完成度  0")
-        self._score_label = QLabel("放松积分  0")
         self._score_label.setObjectName("scoreLabel")
         self._score_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
@@ -671,7 +682,6 @@ class ScorePanel(QWidget):
         self._combo_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         self._time_label = QLabel("本轮剩余  30s")
-        self._time_label = QLabel("剩余  30s")
         self._time_label.setObjectName("timeLabel")
         self._time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
@@ -687,7 +697,6 @@ class ScorePanel(QWidget):
 
     def update_status(self, score, combo, time_left, fps=0):
         self._score_label.setText(f"完成度  {score}")
-        self._score_label.setText(f"放松积分  {score}")
         if combo >= 2:
             self._combo_label.setText(f"连续完成  x{combo}")
             self._combo_label.setObjectName("comboLabelHigh" if combo >= 5 else "comboLabel")
@@ -697,7 +706,6 @@ class ScorePanel(QWidget):
             self._combo_label.setText("")
 
         self._time_label.setText(f"本轮剩余  {int(time_left)}s")
-        self._time_label.setText(f"剩余  {int(time_left)}s")
         self._time_label.setObjectName("timeLabelWarn" if time_left <= 5 else "timeLabel")
         self._time_label.style().unpolish(self._time_label)
         self._time_label.style().polish(self._time_label)
@@ -1053,6 +1061,13 @@ class AssistantPanel(QWidget):
             "color: #8899aa; font-size: 13px; font-family: 'Microsoft YaHei';")
         layout.addWidget(self._mic_label)
 
+        # 语音模式标签
+        self._voice_mode_label = QLabel("")
+        self._voice_mode_label.setStyleSheet(
+            "color: #00d4ff; font-size: 12px; font-family: 'Microsoft YaHei';")
+        self._voice_mode_label.setWordWrap(True)
+        layout.addWidget(self._voice_mode_label)
+
         # 最近输入（我听到 / 理解为）
         recent_title = QLabel("最近指令")
         recent_title.setStyleSheet(
@@ -1200,6 +1215,26 @@ class AssistantPanel(QWidget):
         else:
             self._upper_btn.setChecked(False)
             self._full_btn.setChecked(True)
+
+    def set_voice_mode(self, mode_label: str, hint: str = ""):
+        """设置语音模式显示。
+
+        mode_label: 离线识别 / 在线识别 / 快捷输入 / 不可用
+        hint: 可选提示文本（如 Google 在线识别的网络提示）
+        """
+        color_map = {
+            "离线识别": "#00ff88",
+            "在线识别": "#ffaa00",
+            "快捷输入": "#ffaa00",
+            "不可用": "#ff6666",
+        }
+        color = color_map.get(mode_label, "#8899aa")
+        text = f"语音：{mode_label}"
+        if hint:
+            text += f"\n{hint}"
+        self._voice_mode_label.setText(text)
+        self._voice_mode_label.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-family: 'Microsoft YaHei';")
 
     def set_ai_source(self, source: str):
         """设置 AI 来源（本地 / 外部 AI）"""

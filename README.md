@@ -350,12 +350,45 @@ $env:OFFICEFIT_POSE_MODEL="models/pose_landmarker_full.task"
 
 ### 技术实现
 
-- **语音识别**：`speech_recognition` + `pyaudio`，本地 Google Speech 引擎
+- **语音识别**：可插拔后端架构，支持 Vosk 离线识别 / Google 在线识别 / 快捷输入兜底
 - **对话管理**：纯规则匹配 + 可选外部 AI 增强
 - **UI 面板**：左侧「AI 久坐健康助手」面板，含状态区、最近指令、AI 回复、推荐动作
 - **快捷输入**：面板下方快捷指令按钮，无麦克风环境下的备用输入
 - **文字兜底**：麦克风不可用时快捷输入始终可用
 - **异常容错**：系统针对麦克风独占、设备掉线、音频噪音等常见多媒体设备异常做了容错处理，保证极端场景下交互流程不中断
+
+### 语音识别模式
+
+项目支持三种语音识别后端，通过环境变量 `OFFICEFIT_ASR_BACKEND` 切换：
+
+| 模式 | 环境变量 | 说明 |
+|------|----------|------|
+| **离线识别（推荐路演）** | `OFFICEFIT_ASR_BACKEND=vosk` | 使用 Vosk 离线中文模型，无需网络，识别稳定 |
+| **在线识别** | `OFFICEFIT_ASR_BACKEND=google` | 使用 Google Web Speech API，需网络连接 |
+| **自动选择（默认）** | 不设置 或 `OFFICEFIT_ASR_BACKEND=auto` | Vosk 优先 → Google 降级 → 快捷输入兜底 |
+
+**推荐路演配置**：
+```powershell
+# 1. 安装 Vosk
+pip install vosk
+
+# 2. 下载 Vosk 中文小模型 (42MB) 并解压到 models/vosk-model-small-cn/
+#    下载地址: https://alphacephei.com/vosk/models
+#    推荐: vosk-model-small-cn-0.22
+
+# 3. 启动（离线识别模式）
+$env:OFFICEFIT_ASR_BACKEND="vosk"
+$env:OFFICEFIT_VOSK_MODEL_PATH="models/vosk-model-small-cn"
+python run_game_frontend.py
+```
+
+**在线识别配置**：
+```powershell
+$env:OFFICEFIT_ASR_BACKEND="google"
+python run_game_frontend.py
+```
+
+**兜底说明**：如果语音识别不可用（无网络、无模型），程序自动降级为快捷输入模式，UI 左上角显示「语音：快捷输入」，用户可通过点击快捷指令按钮完成同样流程，程序不会崩溃。
 
 ### 外部 AI 支持（可选）
 

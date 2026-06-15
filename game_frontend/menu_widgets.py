@@ -37,7 +37,8 @@ class MenuPage(QWidget):
         # 顶部装饰线
         accent = QFrame()
         accent.setFixedSize(80, 3)
-        accent.setStyleSheet("background: #00d4ff; border-radius: 2px; border: none;")
+        accent.setStyleSheet(
+            "background: #00d4ff; border-radius: 2px; border: none;")
         layout.addWidget(accent, alignment=Qt.AlignCenter)
         layout.addSpacing(10)
 
@@ -47,18 +48,22 @@ class MenuPage(QWidget):
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        subtitle = QLabel("面向久坐办公人群的 3D 视觉健康陪伴助手")
-        subtitle = QLabel("面向久坐办公人群的 3D 视觉互动放松助手")
+        subtitle = QLabel(
+            "面向久坐办公人群的 "
+            "AI 视觉健康陪伴助手")
         subtitle.setObjectName("subtitleLabel")
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
 
         desc = QLabel(
-            'AI 会观察你的坐姿与活动状态。你可以说出身体不适，'
-            '例如“我肩膀酸”“我脖子紧”“腰背僵硬”，系统会推荐适合的放松动作。')
-        desc = QLabel("通过 Orbbec 3D 相机、YOLO 人体检测和 MediaPipe 姿态估计，引导用户完成轻量化身体活动。")
-        desc.setStyleSheet("color: #556688; font-size: 14px; font-family: 'Microsoft YaHei';")
+            "AI 会观察你的坐姿与活动状态。"
+            "你可以说出身体不适，"
+            "例如「我肩膀酸」「我脖子酸」"
+            "「腰背僵硬」，"
+            "系统会推荐适合的放松动作。")
+        desc.setStyleSheet(
+            "color: #8899bb; font-size: 14px; font-family: 'Microsoft YaHei';")
         desc.setAlignment(Qt.AlignCenter)
         desc.setWordWrap(True)
         layout.addWidget(desc)
@@ -68,14 +73,16 @@ class MenuPage(QWidget):
         _sub_style = ("color: #6677aa; font-size: 12px;"
                       " font-family: 'Microsoft YaHei';")
 
-        self.btn_start = MenuButton("  开始办公  ")
-        self.btn_start.clicked.connect(self.office_clicked.emit)
-        layout.addWidget(self.btn_start, alignment=Qt.AlignCenter)
+        # --- 开始办公 ---
+        self.btn_office = MenuButton("  开始办公  ")
+        self.btn_office.clicked.connect(self.office_clicked.emit)
+        layout.addWidget(self.btn_office, alignment=Qt.AlignCenter)
         office_sub = QLabel("进入 AI 办公守护模式，持续观察久坐状态")
         office_sub.setStyleSheet(_sub_style)
         office_sub.setAlignment(Qt.AlignCenter)
         layout.addWidget(office_sub)
 
+        # --- 2 分钟放松 ---
         self.btn_relax = MenuButton("  开始 2 分钟放松  ")
         self.btn_relax.clicked.connect(self.start_clicked.emit)
         layout.addWidget(self.btn_relax, alignment=Qt.AlignCenter)
@@ -84,18 +91,17 @@ class MenuPage(QWidget):
         relax_sub.setAlignment(Qt.AlignCenter)
         layout.addWidget(relax_sub)
 
+        # --- 使用说明 ---
         self.btn_guide = MenuButton("  使用说明  ")
         self.btn_guide.clicked.connect(self.guide_clicked.emit)
         layout.addWidget(self.btn_guide, alignment=Qt.AlignCenter)
 
-        self.btn_start = MenuButton("  开始 2 分钟放松  ")
-        self.btn_start.clicked.connect(self.start_clicked.emit)
-        layout.addWidget(self.btn_start, alignment=Qt.AlignCenter)
-
+        # --- 放松记录 ---
         self.btn_leaderboard = MenuButton("  放松记录  ")
         self.btn_leaderboard.clicked.connect(self.leaderboard_clicked.emit)
         layout.addWidget(self.btn_leaderboard, alignment=Qt.AlignCenter)
 
+        # --- 退出 ---
         self.btn_exit = QPushButton("  退出  ")
         self.btn_exit.setObjectName("exitBtn")
         self.btn_exit.setCursor(Qt.PointingHandCursor)
@@ -103,11 +109,6 @@ class MenuPage(QWidget):
         layout.addWidget(self.btn_exit, alignment=Qt.AlignCenter)
 
         layout.addSpacing(20)
-
-        hint = QLabel("Orbbec 3D 相机｜MediaPipe 姿态识别｜本地语音与可选 AI 回复")
-        hint.setStyleSheet("color: #3a3a5a; font-size: 13px; font-family: 'Microsoft YaHei';")
-        hint.setAlignment(Qt.AlignCenter)
-        layout.addWidget(hint)
 
 
 class DifficultyPage(QWidget):
@@ -117,9 +118,12 @@ class DifficultyPage(QWidget):
     back_clicked = Signal()
 
     DIFFICULTIES = [
-        ('practice', '轻松模式', '节奏最慢，适合初次使用或识别较慢时', '#00ff88'),
-        ('normal',   '标准模式', '推荐日常使用，节奏较慢，识别更稳', '#ffaa00'),
-        ('hard',     '活力模式', '节奏适中偏快，适合状态较好时挑战', '#ff4466'),
+        ('practice', '轻松模式',
+         '节奏最慢，适合初次使用或识别较慢时', '#00ff88'),
+        ('normal',   '标准模式',
+         '推荐日常使用，节奏较慢，识别更稳', '#ffaa00'),
+        ('hard',     '活力模式',
+         '节奏适中偏快，适合状态较好时挑战', '#ff4466'),
     ]
 
     WORKOUT_MODES = [
@@ -129,9 +133,6 @@ class DifficultyPage(QWidget):
          '需要站立并完整入镜，包含更多身体动作。', '#ffaa00'),
         ('ai_recommend', 'AI 推荐',
          '根据当前观察状态和语音描述生成动作组合。', '#00d4ff'),
-        ('practice', '轻松模式', '适合办公间隙，动作节奏较慢', '#00ff88'),
-        ('normal',   '标准模式', '推荐日常使用，动作节奏适中', '#ffaa00'),
-        ('hard',     '活力模式', '节奏更快，适合状态较好时挑战', '#ff4466'),
     ]
 
     def __init__(self, parent=None):
@@ -146,19 +147,19 @@ class DifficultyPage(QWidget):
 
         accent = QFrame()
         accent.setFixedSize(60, 3)
-        accent.setStyleSheet("background: #ffaa00; border-radius: 2px; border: none;")
+        accent.setStyleSheet(
+            "background: #ffaa00; border-radius: 2px; border: none;")
         layout.addWidget(accent, alignment=Qt.AlignCenter)
         layout.addSpacing(6)
 
         # 标题
-        title = QLabel("选择本次放松方案")
-        title = QLabel("选择放松模式")
+        title = QLabel("选择放松方案")
         title.setObjectName("titleLabel")
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # ── 放松类型 ──
-        type_label = QLabel("— 放松类型 —")
+        # --- 放松类型 ---
+        type_label = QLabel("--- 放松类型 ---")
         type_label.setStyleSheet(
             "color: #6677aa; font-size: 14px; font-family: 'Microsoft YaHei';")
         type_label.setAlignment(Qt.AlignCenter)
@@ -173,7 +174,8 @@ class DifficultyPage(QWidget):
             btn.setFixedWidth(280)
             btn.setMinimumHeight(65)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked, m=mode_id: self._select_mode(m))
+            btn.clicked.connect(
+                lambda checked, m=mode_id: self._select_mode(m))
             mode_row.addWidget(btn, alignment=Qt.AlignCenter)
             self._mode_buttons[mode_id] = (btn, color)
         layout.addLayout(mode_row)
@@ -188,8 +190,8 @@ class DifficultyPage(QWidget):
 
         layout.addSpacing(8)
 
-        # ── 难度选择 ──
-        diff_label = QLabel("— 难度 —")
+        # --- 难度选择 ---
+        diff_label = QLabel("--- 难度 ---")
         diff_label.setStyleSheet(
             "color: #6677aa; font-size: 14px; font-family: 'Microsoft YaHei';")
         diff_label.setAlignment(Qt.AlignCenter)
@@ -202,7 +204,8 @@ class DifficultyPage(QWidget):
             btn.setFixedWidth(420)
             btn.setMinimumHeight(70)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda checked, d=diff_id: self._select(d))
+            btn.clicked.connect(
+                lambda checked, d=diff_id: self._select(d))
             layout.addWidget(btn, alignment=Qt.AlignCenter)
             self._buttons[diff_id] = btn
 
@@ -290,7 +293,8 @@ class SettingsPage(QWidget):
 
         accent = QFrame()
         accent.setFixedSize(60, 3)
-        accent.setStyleSheet("background: #00d4ff; border-radius: 2px; border: none;")
+        accent.setStyleSheet(
+            "background: #00d4ff; border-radius: 2px; border: none;")
         layout.addWidget(accent, alignment=Qt.AlignCenter)
         layout.addSpacing(8)
 
@@ -344,7 +348,8 @@ class GameOverPage(QWidget):
         # 装饰线
         sep = QFrame()
         sep.setFixedSize(200, 2)
-        sep.setStyleSheet("background: #00d4ff; border-radius: 1px; border: none;")
+        sep.setStyleSheet(
+            "background: #00d4ff; border-radius: 1px; border: none;")
         layout.addWidget(sep, alignment=Qt.AlignCenter)
         layout.addSpacing(8)
 
@@ -360,7 +365,7 @@ class GameOverPage(QWidget):
         mode_names = {'practice': '轻松', 'normal': '标准', 'hard': '活力'}
         display = mode_names.get(mode, mode)
         self._score_label.setText(f"完成度  {score}")
-        self._best_label.setText(f"最佳  {high_score}    ·    {display}")
+        self._best_label.setText(f"最佳  {high_score}    -    {display}")
 
     def set_session_ended(self):
         """用户手动结束本轮放松"""
@@ -383,4 +388,3 @@ class GameOverPage(QWidget):
             " font-family: 'Microsoft YaHei';")
         self._score_label.setStyleSheet(
             "color: #ffffff; font-size: 30px; font-family: 'Microsoft YaHei';")
-

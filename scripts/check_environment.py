@@ -288,7 +288,7 @@ def check_resources():
 
 def check_microphone():
     print("\n" + "=" * 60)
-    print("  麦克风检查")
+    print("  麦克风 & 语音识别检查")
     print("=" * 60)
 
     mic_ok = False
@@ -310,6 +310,59 @@ def check_microphone():
         _result(_ICON_WARN, "pyaudio 未安装",
                 "语音识别不可用，可使用模拟语音按钮\n"
                 "          pip install pyaudio")
+
+    # ── Vosk 离线识别 ──
+    print()
+    print("  ── 离线语音识别 (Vosk) ──")
+    ok, detail = _check_import("vosk")
+    if ok:
+        _result(_ICON_PASS, "vosk 已安装")
+    else:
+        _result(_ICON_WARN, "vosk 未安装",
+                "离线语音识别不可用\n"
+                "          pip install vosk")
+
+    # 检查 Vosk 模型
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+    vosk_model_path = os.environ.get(
+        "OFFICEFIT_VOSK_MODEL_PATH",
+        os.path.join(project_root, "models", "vosk-model-small-cn"),
+    )
+    if os.path.isdir(vosk_model_path):
+        # 简单检查：目录下是否有 am/ 或 conf/ 子目录
+        has_am = os.path.isdir(os.path.join(vosk_model_path, "am"))
+        has_conf = os.path.isdir(os.path.join(vosk_model_path, "conf"))
+        if has_am or has_conf:
+            _result(_ICON_PASS, "Vosk 中文模型",
+                    os.path.relpath(vosk_model_path, project_root))
+        else:
+            _result(_ICON_WARN, "Vosk 模型目录结构不完整",
+                    f"{vosk_model_path} 缺少 am/ 或 conf/ 子目录")
+    else:
+        _result(_ICON_WARN, "Vosk 中文模型未找到",
+                f"路径: {vosk_model_path}\n"
+                "          下载: https://alphacephei.com/vosk/models\n"
+                "          推荐: vosk-model-small-cn-0.22 (42MB)\n"
+                "          解压到 models/vosk-model-small-cn/\n"
+                "          或设置: $env:OFFICEFIT_VOSK_MODEL_PATH='路径'")
+
+    # 当前语音后端选择
+    print()
+    asr_backend = os.environ.get("OFFICEFIT_ASR_BACKEND", "auto").strip().lower()
+    if asr_backend == "vosk":
+        _result(_ICON_PASS if ok and os.path.isdir(vosk_model_path) else _ICON_WARN,
+                "语音后端: vosk（离线识别）",
+                "通过 OFFICEFIT_ASR_BACKEND=vosk 指定")
+    elif asr_backend == "google":
+        _result(_ICON_PASS,
+                "语音后端: google（在线识别）",
+                "通过 OFFICEFIT_ASR_BACKEND=google 指定\n"
+                "          注意：在线识别依赖网络连接")
+    else:
+        _result(_ICON_PASS,
+                "语音后端: auto（自动选择）",
+                "优先级: Vosk 离线 > Google 在线 > 快捷输入兜底")
 
     # 列出麦克风设备
     try:

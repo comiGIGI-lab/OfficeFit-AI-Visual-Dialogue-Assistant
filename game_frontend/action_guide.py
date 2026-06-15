@@ -133,32 +133,18 @@ class ActionGuideDialog(QDialog):
             " font-family: 'Microsoft YaHei';")
         layout.addWidget(title)
 
-        # 快捷键说明
-        shortcuts_text = (
-            "快捷键:  F11 切换全屏  |  ESC 返回首页  |  "
-            "R 重新开始本轮放松  |  Q 结束本轮放松"
+        # 提示规则说明
+        hint_text = (
+            '🟢 绿色提示：做屏幕显示的动作\n'
+            '🔴 红色提示：做相反方向的动作'
         )
-        shortcuts = QLabel(shortcuts_text)
-        shortcuts.setAlignment(Qt.AlignCenter)
-        shortcuts.setStyleSheet(
-            "color: #6677aa; font-size: 12px; font-family: 'Microsoft YaHei';"
-            " padding: 4px;")
-        layout.addWidget(shortcuts)
-
-        # 反向模式说明
-        reverse_text = (
-            '绿色提示：做屏幕显示的动作。\n'
-            '红色提示：做相反方向的动作。\n'
-            '例如：提示「反向 左手上举」，请做右手上举。\n'
-            '例如：提示「反向 右侧拉伸」，请做左侧拉伸。'
-        )
-        reverse_info = QLabel(reverse_text)
-        reverse_info.setWordWrap(True)
-        reverse_info.setAlignment(Qt.AlignCenter)
-        reverse_info.setStyleSheet(
-            "color: #ff6688; font-size: 13px; font-family: 'Microsoft YaHei';"
-            " background: rgba(255,68,102,0.1); border-radius: 8px; padding: 8px;")
-        layout.addWidget(reverse_info)
+        hint_info = QLabel(hint_text)
+        hint_info.setWordWrap(True)
+        hint_info.setAlignment(Qt.AlignCenter)
+        hint_info.setStyleSheet(
+            "color: #c0d0e0; font-size: 13px; font-family: 'Microsoft YaHei';"
+            " background: rgba(15,52,96,0.3); border-radius: 8px; padding: 8px;")
+        layout.addWidget(hint_info)
 
         # 滚动区域
         scroll = QScrollArea()

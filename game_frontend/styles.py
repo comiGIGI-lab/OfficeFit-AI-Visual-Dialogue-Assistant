@@ -113,39 +113,38 @@ QWidget#glassPanel {
 
 QLabel#scoreLabel {
     color: #00ff88;
-    font-size: 34px;
+    font-size: 28px;
     font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-family: "Microsoft YaHei";
 }
 QLabel#fpsLabel {
     color: #6677aa;
-    font-size: 34px;
-    font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-size: 13px;
+    font-family: "Microsoft YaHei";
 }
 QLabel#comboLabel {
     color: #ffaa00;
-    font-size: 26px;
+    font-size: 18px;
     font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-family: "Microsoft YaHei";
 }
 QLabel#comboLabelHigh {
     color: #ff6600;
-    font-size: 30px;
+    font-size: 22px;
     font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-family: "Microsoft YaHei";
 }
 QLabel#timeLabel {
     color: #00d4ff;
-    font-size: 30px;
+    font-size: 22px;
     font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-family: "Microsoft YaHei";
 }
 QLabel#timeLabelWarn {
     color: #ff4444;
-    font-size: 32px;
+    font-size: 24px;
     font-weight: bold;
-    font-family: "Consolas", "Microsoft YaHei";
+    font-family: "Microsoft YaHei";
 }
 QLabel#modeLabel {
     color: #6677aa;

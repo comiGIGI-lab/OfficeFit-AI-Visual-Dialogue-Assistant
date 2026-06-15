@@ -3,8 +3,17 @@
 本地语音指令识别服务 (MVP)
 ===========================
 
-使用 speech_recognition + pyaudio 实现轻量语音指令识别。
-不依赖云端 API，所有识别在本机完成。
+支持可插拔语音识别后端：
+
+- VoskOfflineBackend      — 离线中文识别（推荐路演使用）
+- SpeechRecognitionGoogleBackend — Google 在线识别（需网络）
+- MockQuickCommandBackend — 快捷输入兜底（无语音识别时）
+
+选择规则（环境变量 OFFICEFIT_ASR_BACKEND）：
+  "vosk"   → 仅 Vosk 离线识别
+  "google" → 仅 Google 在线识别
+  "auto"   → Vosk 优先 → Google 降级 → 快捷输入兜底
+  未设置   → 等同 "auto"
 
 用法:
     from game_frontend.voice_service import VoiceService
@@ -32,7 +41,10 @@ import time
 from typing import Optional, Callable
 
 
-# 关键词列表 + 别名映射
+# ============================================================================
+# 关键词列表 + 别名映射（不变）
+# ============================================================================
+
 _KEYWORD_ALIASES = {
     "开始放松": [
         "开始", "开始训练", "开始放松一下", "开始运动",
@@ -50,14 +62,13 @@ _KEYWORD_ALIASES = {
     "我脖子酸": ["脖子酸", "颈部酸", "低头久了", "脖子不舒服"],
     "我肩膀酸": ["肩膀酸", "肩膀发麻", "肩颈僵硬", "肩膀不舒服"],
     "腰背僵硬": ["背酸", "腰酸", "腰背不适"],
-    # 旧口令兼容：统一归一化到“开始放松”，不在 UI 中主动展示。
+    # 旧口令兼容：统一归一化到"开始放松"，不在 UI 中主动展示。
     "开始放松": ["开始游戏", "开始挑战", "体感挑战", "游戏模式", "start"],
     "开始办公": ["开始工作", "办公模式"],
     "返回办公模式": ["回办公", "回到办公"],
     "结束办公": ["退出办公", "停止办公"],
 }
 
-# 扁平关键词 → 标准名
 _KEYWORD_MAP: dict = {}
 for _std, _aliases in _KEYWORD_ALIASES.items():
     _KEYWORD_MAP[_std] = _std
@@ -67,26 +78,14 @@ for _std, _aliases in _KEYWORD_ALIASES.items():
 KEYWORDS = list(_KEYWORD_ALIASES.keys())
 
 
-def _check_voice_imports() -> bool:
-    """检测 speech_recognition 和 pyaudio 是否可导入"""
-    try:
-        import speech_recognition as sr  # noqa: F401
-        import pyaudio                  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 def _match_keyword(text: str):
     """在文本中匹配关键词（含同义词），返回标准关键词或 None"""
     if not text:
         return None
     text_lower = text.strip().lower()
-    # 精确匹配优先
     for keyword in KEYWORDS:
         if keyword in text_lower:
             return keyword
-    # 别名匹配
     for alias, standard in _KEYWORD_MAP.items():
         if alias in text_lower and alias != standard:
             return standard
@@ -102,15 +101,12 @@ def _dedup_repeated_phrase(text: str) -> str:
     """
     if not text:
         return text
-    # 找最短的非空重复前缀
     n = len(text)
     for pat_len in range(2, n // 2 + 1):
         pat = text[:pat_len]
-        # 检查 text 是否以 pat 重复开头（允许最后一段不完整）
         i = pat_len
         while i + pat_len <= n and text[i:i + pat_len] == pat:
             i += pat_len
-        # 最后一段不完整但能匹配前缀 → 也是重复
         remaining = n - i
         if i > pat_len and remaining > 0 and remaining < pat_len:
             if pat[:remaining] == text[i:]:
@@ -130,10 +126,8 @@ def normalize_command(text: str) -> str:
     if not text:
         return ""
     t = text.strip()
-    # 先做重复短语去重
     t = _dedup_repeated_phrase(t)
 
-    # 旧口令兼容：统一为开始放松
     if any(k in t for k in ("计分挑战", "进入挑战", "开始挑战", "挑战模式",
                              "开始游戏", "游戏模式", "体感挑战")):
         return "开始放松"
@@ -155,16 +149,252 @@ def normalize_command(text: str) -> str:
         return "开始办公"
     if any(k in t for k in ("结束办公", "退出办公")):
         return "结束办公"
-    # 其它（含身体不适）→ 原样返回，交给意图识别
     return t
 
 
-class VoiceService:
-    """本地语音指令识别服务
+# ============================================================================
+# 语音后端基类
+# ============================================================================
 
-    在后台线程中单次监听麦克风（最长 N 秒）。
-    支持录音中再次点击结束、音量回调。
-    """
+class VoiceBackendBase:
+    """语音识别后端抽象基类"""
+
+    @property
+    def name(self) -> str:
+        """后端标识名（vosk / google / mock）"""
+        raise NotImplementedError
+
+    @property
+    def mode_label(self) -> str:
+        """UI 显示标签（离线识别 / 在线识别 / 快捷输入 / 不可用）"""
+        raise NotImplementedError
+
+    @property
+    def hint_text(self) -> str:
+        """UI 提示文本（可选）"""
+        return ""
+
+    def is_available(self) -> bool:
+        """后端是否可用"""
+        raise NotImplementedError
+
+    def recognize(self, audio_data) -> Optional[str]:
+        """对音频数据执行识别，返回文本或 None（识别失败）"""
+        raise NotImplementedError
+
+    def cleanup(self):
+        """释放后端资源"""
+        pass
+
+
+# ============================================================================
+# Google 在线识别后端
+# ============================================================================
+
+class SpeechRecognitionGoogleBackend(VoiceBackendBase):
+    """基于 speech_recognition + Google Web Speech API 的在线识别"""
+
+    def __init__(self, language: str = "zh-CN"):
+        self._language = language
+        self._available = False
+        try:
+            import speech_recognition as sr  # noqa: F401
+            self._available = True
+        except ImportError:
+            self._available = False
+
+    @property
+    def name(self) -> str:
+        return "google"
+
+    @property
+    def mode_label(self) -> str:
+        return "在线识别"
+
+    @property
+    def hint_text(self) -> str:
+        return "在线识别依赖网络，路演建议使用离线识别或快捷输入。"
+
+    def is_available(self) -> bool:
+        return self._available
+
+    def recognize(self, audio_data) -> Optional[str]:
+        import speech_recognition as sr
+        try:
+            recognizer = sr.Recognizer()
+            text = recognizer.recognize_google(audio_data, language=self._language)
+            return text
+        except sr.UnknownValueError:
+            return None
+        except sr.RequestError as e:
+            raise ConnectionError(
+                f"在线语音识别连接失败，已切换为快捷输入模式。"
+            ) from e
+        except OSError as e:
+            raise ConnectionError(
+                f"在线语音识别连接失败，已切换为快捷输入模式。"
+            ) from e
+
+
+# ============================================================================
+# Vosk 离线识别后端
+# ============================================================================
+
+class VoskOfflineBackend(VoiceBackendBase):
+    """基于 Vosk 的离线中文语音识别"""
+
+    def __init__(self, model_path: Optional[str] = None, language: str = "zh-CN"):
+        self._language = language
+        self._model = None
+        self._available = False
+        self._error_message = ""
+
+        # 确定模型路径
+        if model_path:
+            self._model_path = model_path
+        else:
+            self._model_path = os.environ.get(
+                "OFFICEFIT_VOSK_MODEL_PATH", "").strip()
+
+        if not self._model_path:
+            # 默认路径
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            self._model_path = os.path.join(
+                project_root, "models", "vosk-model-small-cn")
+
+        # 尝试初始化
+        self._init_vosk()
+
+    def _init_vosk(self):
+        """初始化 Vosk 模型"""
+        # 1. 检查 vosk 包
+        try:
+            import vosk  # noqa: F401
+        except ImportError:
+            self._available = False
+            self._error_message = (
+                "vosk 未安装，请执行: pip install vosk"
+            )
+            return
+
+        # 2. 检查模型目录
+        if not os.path.isdir(self._model_path):
+            self._available = False
+            self._error_message = (
+                f"未检测到离线语音模型，可下载 Vosk 中文小模型并放入 "
+                f"{self._model_path}\n"
+                f"下载地址: https://alphacephei.com/vosk/models\n"
+                f"推荐模型: vosk-model-small-cn-0.22 (42MB)"
+            )
+            return
+
+        # 3. 加载模型
+        try:
+            import vosk
+            self._model = vosk.Model(self._model_path)
+            self._available = True
+            self._error_message = ""
+            print(f"[Vosk] 离线模型已加载: {self._model_path}")
+        except Exception as e:
+            self._available = False
+            self._error_message = (
+                f"Vosk 模型加载失败: {e}\n"
+                f"模型路径: {self._model_path}"
+            )
+
+    @property
+    def name(self) -> str:
+        return "vosk"
+
+    @property
+    def mode_label(self) -> str:
+        return "离线识别"
+
+    @property
+    def hint_text(self) -> str:
+        return ""
+
+    def is_available(self) -> bool:
+        return self._available
+
+    @property
+    def error_message(self) -> str:
+        return self._error_message
+
+    def recognize(self, audio_data) -> Optional[str]:
+        if not self._model:
+            return None
+        try:
+            import vosk
+            import json
+
+            # audio_data 是 speech_recognition AudioData
+            # 获取原始 PCM 字节
+            raw_pcm = audio_data.get_raw_data(
+                convert_rate=16000,
+                convert_width=2,
+            )
+
+            rec = vosk.KaldiRecognizer(self._model, 16000)
+            if rec.AcceptWaveform(raw_pcm):
+                result = json.loads(rec.Result())
+                text = result.get("text", "").strip()
+            else:
+                partial = json.loads(rec.PartialResult())
+                text = partial.get("partial", "").strip()
+
+            return text if text else None
+        except Exception as e:
+            print(f"[Vosk] 识别异常: {e}")
+            return None
+
+    def cleanup(self):
+        self._model = None
+        self._available = False
+
+
+# ============================================================================
+# Mock 快捷输入后端（无语音识别时的兜底）
+# ============================================================================
+
+class MockQuickCommandBackend(VoiceBackendBase):
+    """无语音识别时的占位后端 — 仅支持 simulate_command 快捷输入"""
+
+    def __init__(self, reason: str = ""):
+        self._reason = reason
+
+    @property
+    def name(self) -> str:
+        return "mock"
+
+    @property
+    def mode_label(self) -> str:
+        return "快捷输入"
+
+    @property
+    def hint_text(self) -> str:
+        if self._reason:
+            return self._reason
+        return "语音识别未启用，可使用快捷输入"
+
+    def is_available(self) -> bool:
+        return False  # 麦克风不可用，但 simulate_command 仍可用
+
+    def recognize(self, audio_data) -> Optional[str]:
+        return None
+
+    @property
+    def reason(self) -> str:
+        return self._reason
+
+
+# ============================================================================
+# 语音服务（后端编排 + 麦克风管理）
+# ============================================================================
+
+class VoiceService:
+    """语音指令识别服务 — 自动选择后端并管理麦克风生命周期"""
 
     def __init__(self, language: str = "zh-CN"):
         self._language = language
@@ -174,33 +404,109 @@ class VoiceService:
         self._running = False
         self._stop_requested = False
         self._last_text: str = ""
-        self._last_raw_text: str = ""        # 原始识别文本（未归一化）
-        self._last_normalized: str = ""      # 归一化后的业务指令/文本
+        self._last_raw_text: str = ""
+        self._last_normalized: str = ""
         self._last_error: str = ""
-        self._last_error_type: str = ""  # no_mic / timeout / no_speech / service_error / user_stop
+        self._last_error_type: str = ""
         self._voice_available: bool = False
         self._mic_device_name: str = ""
         self._mic_device_index: Optional[int] = None
 
         self._recognizer = None
         self._microphone = None
-        self._pa = None              # pyaudio instance (for volume monitoring)
-        self._volume_stream = None   # raw pyaudio stream for RMS
+        self._pa = None
+        self._volume_stream = None
 
-        if not _check_voice_imports():
-            self._last_error = (
-                "speech_recognition 或 pyaudio 未安装\n"
-                "pip install SpeechRecognition pyaudio"
+        # ── 后端选择 ──
+        self._backend: VoiceBackendBase = None
+        self._backend_mode: str = "unavailable"
+        self._select_backend()
+
+        # 如果后端需要麦克风（google / vosk），初始化麦克风
+        if self._backend is not None and self._backend.name in ("google", "vosk"):
+            self._voice_available = self._mic_init()
+        else:
+            self._voice_available = False
+
+        # 打印后端状态
+        print(f"[Voice] 语音后端: {self._backend_mode} "
+              f"({self._backend.mode_label if self._backend else '无'})"
+              f"{' — 麦克风可用' if self._voice_available else ''}")
+
+    # ── 后端选择逻辑 ────────────────────────────────────────
+
+    def _select_backend(self):
+        """根据环境变量选择语音后端"""
+        backend_env = os.environ.get("OFFICEFIT_ASR_BACKEND", "auto").strip().lower()
+
+        if backend_env == "vosk":
+            self._try_vosk()
+            if self._backend is None:
+                # Vosk 不可用 — 降级到 mock
+                reason = (
+                    "离线语音模型不可用。可下载 Vosk 中文小模型：\n"
+                    "models/vosk-model-small-cn\n"
+                    "或设置 $env:OFFICEFIT_ASR_BACKEND='google' 使用在线识别"
+                )
+                self._backend = MockQuickCommandBackend(reason)
+                self._backend_mode = "mock"
+                print(f"[Voice] Vosk 不可用，降级为快捷输入")
+        elif backend_env == "google":
+            self._backend = SpeechRecognitionGoogleBackend(self._language)
+            self._backend_mode = "google"
+        else:  # "auto" 或未设置
+            # 优先级：Vosk → Google → Mock
+            self._try_vosk()
+            if self._backend is not None:
+                return  # Vosk 成功
+
+            self._backend = SpeechRecognitionGoogleBackend(self._language)
+            if self._backend.is_available():
+                self._backend_mode = "google"
+                return
+
+            # 全部不可用 → Mock
+            reason = (
+                "语音识别未启用，可使用快捷输入。\n"
+                "提示：安装 vosk + 中文模型可启用离线识别。"
             )
-            self._last_error_type = "no_mic"
-            return
+            self._backend = MockQuickCommandBackend(reason)
+            self._backend_mode = "mock"
 
-        self._recognizer = self._mic_init()
+    def _try_vosk(self):
+        """尝试初始化 Vosk 后端；成功则设置 self._backend 和 self._backend_mode"""
+        backend = VoskOfflineBackend()
+        if backend.is_available():
+            self._backend = backend
+            self._backend_mode = "vosk"
+        else:
+            print(f"[Voice] Vosk: {backend.error_message}")
+            self._backend = None
+
+    # ── 后端信息（供 UI 查询）─────────────────────────────
+
+    @property
+    def backend_mode(self) -> str:
+        """当前语音模式标签: vosk / google / mock / unavailable"""
+        return self._backend_mode
+
+    @property
+    def backend_label(self) -> str:
+        """UI 显示的语音模式: 离线识别 / 在线识别 / 快捷输入 / 不可用"""
+        if self._backend is None:
+            return "不可用"
+        return self._backend.mode_label
+
+    @property
+    def backend_hint(self) -> str:
+        """UI 显示的提示文本"""
+        if self._backend is None:
+            return "语音识别未启用，可使用快捷输入"
+        return self._backend.hint_text
 
     # ── 麦克风初始化 ─────────────────────────────────────
 
     def _list_input_devices(self):
-        """用 pyaudio 列出有输入通道的设备，返回 [(index, name), ...]"""
         devices = []
         try:
             import pyaudio
@@ -215,15 +521,20 @@ class VoiceService:
         return devices
 
     def _mic_init(self):
-        """初始化麦克风，返回 Recognizer 或 None"""
-        import speech_recognition as sr
+        """初始化麦克风，返回 True/False"""
+        try:
+            import speech_recognition as sr
+        except ImportError:
+            self._last_error = (
+                "speech_recognition 未安装，无法使用麦克风\n"
+                "pip install SpeechRecognition"
+            )
+            self._last_error_type = "no_mic"
+            return False
 
-        # 列出所有麦克风
         sr_names = sr.Microphone.list_microphone_names()
         pa_devices = self._list_input_devices()
 
-        # 默认只在排障模式下打印完整设备列表，避免启动刷屏
-        # 排障：$env:OFFICEFIT_VOICE_DEBUG="1"
         if os.environ.get("OFFICEFIT_VOICE_DEBUG", "").strip() == "1":
             print("[Voice] Available microphones (speech_recognition):")
             for i, name in enumerate(sr_names):
@@ -233,19 +544,15 @@ class VoiceService:
                 for idx, name in pa_devices:
                     print(f"  [{idx}] {name}")
 
-        # 无输入设备 → 不可用
         if not pa_devices and not sr_names:
             self._last_error = "未检测到任何麦克风输入设备"
             self._last_error_type = "no_mic"
-            self._voice_available = False
-            return None
+            return False
 
-        # 确定使用的设备编号
         env_index = os.environ.get("OFFICEFIT_MIC_INDEX", "").strip()
         recognizer = sr.Recognizer()
 
         if env_index:
-            # 用户指定编号
             try:
                 idx = int(env_index)
                 mic = sr.Microphone(device_index=idx)
@@ -254,10 +561,10 @@ class VoiceService:
                 self._microphone = mic
                 self._mic_device_index = idx
                 self._mic_device_name = name
-                self._voice_available = True
+                self._recognizer = recognizer
                 print(f"[Voice] Using microphone index: {idx}, name: {name} "
                       f"(OFFICEFIT_MIC_INDEX)")
-                return recognizer
+                return True
             except Exception as e:
                 self._last_error = (
                     f"麦克风设备编号 {env_index} 不可用: {e}\n"
@@ -265,50 +572,45 @@ class VoiceService:
                     f"可用编号: {[d[0] for d in pa_devices]}"
                 )
                 self._last_error_type = "no_mic"
-                self._voice_available = False
-                return None
+                return False
 
-        # 自动模式：先试默认 → 再试第一个 pyaudio 输入设备
-        # 尝试默认设备
+        # 自动模式
         try:
             mic = sr.Microphone()
             self._microphone = mic
             self._mic_device_index = 0
             self._mic_device_name = sr_names[0] if sr_names else "default"
-            self._voice_available = True
+            self._recognizer = recognizer
             print(f"[Voice] Using microphone index: {self._mic_device_index}, "
                   f"name: {self._mic_device_name} (default)")
-            return recognizer
+            return True
         except Exception as e:
             print(f"[Voice] 默认麦克风失败: {e}, 尝试 fallback...")
 
-        # fallback: pyaudio 第一个输入设备
         for idx, name in pa_devices:
             try:
                 mic = sr.Microphone(device_index=idx)
                 self._microphone = mic
                 self._mic_device_index = idx
                 self._mic_device_name = name
-                self._voice_available = True
+                self._recognizer = recognizer
                 print(f"[Voice] Using microphone index: {idx}, name: {name} "
                       f"(fallback)")
-                return recognizer
+                return True
             except Exception:
                 continue
 
-        # 全部失败
         self._last_error = (
             "所有麦克风设备初始化失败\n"
             "可尝试手动指定: $env:OFFICEFIT_MIC_INDEX='编号'"
         )
         self._last_error_type = "no_mic"
-        self._voice_available = False
-        return None
+        return False
 
     # ── 公开 API ──────────────────────────────────────────
 
     def is_available(self) -> bool:
-        """语音识别是否可用"""
+        """语音识别是否可用（有可用的后端 + 麦克风就绪）"""
         return self._voice_available
 
     @property
@@ -321,35 +623,28 @@ class VoiceService:
 
     @property
     def last_text(self) -> str:
-        """最近一次识别到的原始文本"""
         return self._last_text
 
     @property
     def last_error(self) -> str:
-        """最近一次错误信息"""
         return self._last_error
 
     @property
     def last_error_type(self) -> str:
-        """最近一次错误类型: no_mic / timeout / no_speech / service_error / ''"""
         return self._last_error_type
 
     @property
     def last_raw_text(self) -> str:
-        """最近一次原始识别文本（未归一化）"""
         return self._last_raw_text
 
     @property
     def last_normalized(self) -> str:
-        """最近一次归一化后的业务指令/文本"""
         return self._last_normalized
 
     def set_callback(self, callback: Callable[[str], None]):
-        """设置指令回调。callback 接收归一化后的指令字符串。"""
         self._callback = callback
 
     def set_volume_callback(self, callback: Callable[[float], None]):
-        """设置音量回调。callback 接收 0.0~1.0 的 RMS 音量值。"""
         self._volume_callback = callback
 
     def start_listening(self):
@@ -373,12 +668,10 @@ class VoiceService:
         print("[Voice] Listening started (max 5s)...")
 
     def request_stop(self):
-        """请求主动结束当前录音（再次点击语音按钮时调用）"""
         self._stop_requested = True
         print("[Voice] Stop requested by user")
 
     def stop_listening(self):
-        """停止监听"""
         self._running = False
         self._stop_volume_monitor()
         if self._thread is not None:
@@ -389,7 +682,6 @@ class VoiceService:
     # ── 音量监测 ──────────────────────────────────────────
 
     def _start_volume_monitor(self):
-        """启动独立的 pyaudio 流用于实时音量监测"""
         self._stop_volume_monitor()
         try:
             import pyaudio
@@ -411,22 +703,19 @@ class VoiceService:
             self._volume_stream = None
 
     def _volume_stream_callback(self, in_data, frame_count, time_info, status):
-        """pyaudio 回调：计算 RMS 音量 → 通过 volume_callback 发送"""
         try:
             import pyaudio
             import numpy as np
             audio_data = np.frombuffer(in_data, dtype=np.int16).astype(np.float32)
             rms = np.sqrt(np.mean(audio_data ** 2)) if len(audio_data) > 0 else 0
-            # 归一化到 0.0~1.0 (典型静音 ~50, 正常说话 ~2000, 裁剪到 4000)
             level = min(1.0, max(0.0, rms / 4000.0))
             if self._volume_callback:
                 self._volume_callback(level)
             return (None, pyaudio.paContinue)
         except Exception:
-            return (None, 0)  # pyaudio.paContinue is 0
+            return (None, 0)
 
     def _stop_volume_monitor(self):
-        """停止音量监测流"""
         if self._volume_stream is not None:
             try:
                 self._volume_stream.stop_stream()
@@ -444,9 +733,7 @@ class VoiceService:
     # ── 单次监听 ──────────────────────────────────────────
 
     def _listen_once(self):
-        """单次监听：听一次 → 识别 → 自动停止
-        支持 stop_requested：用户再次点击按钮时提前结束录音。
-        """
+        """单次监听：录音 → 后端识别 → 回调"""
         import speech_recognition as sr
 
         if not self._microphone or not self._recognizer:
@@ -454,7 +741,7 @@ class VoiceService:
             self._stop_volume_monitor()
             return
 
-        # 校准
+        # 噪声校准
         try:
             with self._microphone as source:
                 self._recognizer.adjust_for_ambient_noise(source, duration=0.5)
@@ -465,18 +752,37 @@ class VoiceService:
             self._stop_volume_monitor()
             return
 
-        # 单次监听
+        # 录音
         try:
             with self._microphone as source:
                 audio = self._recognizer.listen(
                     source, timeout=5.0, phrase_time_limit=3.0)
-            # 用户主动结束录音 → 仍尝试识别已捕获的音频
+
             if self._stop_requested:
                 print("[Voice] User stopped recording, recognizing captured audio...")
-            # 识别
+
+            # ── 使用后端识别 ──
             try:
-                text = self._recognizer.recognize_google(
-                    audio, language=self._language)
+                text = self._backend.recognize(audio)
+            except ConnectionError as e:
+                # 在线识别连接失败 → 用户可理解文案
+                self._last_error = str(e)
+                self._last_error_type = "service_error"
+                print(f"[Voice] 在线语音识别连接失败，已切换为快捷输入模式。")
+                print(f"[Voice] 详细错误: {e.__cause__ if e.__cause__ else e}")
+                self._running = False
+                self._stop_volume_monitor()
+                return
+            except Exception as e:
+                self._last_error = f"识别异常: {e}"
+                self._last_error_type = "service_error"
+                print(f"[Voice] {self._last_error}")
+                self._running = False
+                self._stop_volume_monitor()
+                return
+
+            if text:
+                # 识别成功
                 self._last_error = ""
                 self._last_error_type = ""
                 self._last_raw_text = text
@@ -488,7 +794,8 @@ class VoiceService:
                     print(f"[Voice] normalized: {command}")
                 if command and self._callback:
                     self._callback(command)
-            except sr.UnknownValueError:
+            else:
+                # 后端返回 None（没听清 / 无语音）
                 if self._stop_requested:
                     self._last_error = "录音已结束"
                     self._last_error_type = "user_stop"
@@ -496,14 +803,7 @@ class VoiceService:
                     self._last_error = "没有听清，请再试一次或使用快捷输入"
                     self._last_error_type = "no_speech"
                 print(f"[Voice] {self._last_error}")
-            except sr.RequestError as e:
-                self._last_error = f"识别服务不可用: {e}"
-                self._last_error_type = "service_error"
-                print(f"[Voice] {self._last_error}")
-            except OSError as e:
-                self._last_error = f"麦克风被占用: {e}"
-                self._last_error_type = "no_mic"
-                print(f"[Voice] {self._last_error}")
+
         except sr.WaitTimeoutError:
             if self._stop_requested:
                 self._last_error = "录音已结束"
@@ -535,3 +835,9 @@ class VoiceService:
             print(f"[Voice] Quick input normalized: {command}")
         if command and self._callback:
             self._callback(command)
+
+    def cleanup(self):
+        """释放所有资源"""
+        self.stop_listening()
+        if self._backend is not None:
+            self._backend.cleanup()

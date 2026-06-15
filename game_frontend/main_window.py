@@ -167,10 +167,10 @@ class MainWindow(QMainWindow):
             panel.set_listen_error("语音服务未初始化")
             return
         if not self._voice_service.is_available():
+            # 后端不可用（如 mock 模式）→ 引导用户使用快捷输入
+            backend_hint = self._voice_service.backend_hint
             panel.set_listen_error(
-                f"麦克风不可用: {self._voice_service.last_error}"
-                if self._voice_service.last_error
-                else "请检查麦克风连接或使用快捷输入按钮"
+                backend_hint or "请检查麦克风连接或使用快捷输入按钮"
             )
             return
 
@@ -551,18 +551,27 @@ class MainWindow(QMainWindow):
             )
 
     def _update_mic_status(self):
-        """更新 UI 中的麦克风/AI 状态"""
+        """更新 UI 中的麦克风/AI/语音模式状态"""
         panel = self._game_page.assistant_panel
         if hasattr(self, '_ai_client') and self._ai_client:
             panel.set_ai_source(self._ai_client.get_status()["source"])
         if self._voice_service is not None:
-            panel.set_mic_available(self._voice_service.is_available())
+            mic_available = self._voice_service.is_available()
+            panel.set_mic_available(mic_available)
             panel.set_mic_device(
                 self._voice_service.mic_device_name,
                 self._voice_service.mic_device_index or 0,
             )
+            # 显示当前语音模式
+            mode_label = self._voice_service.backend_label
+            hint = self._voice_service.backend_hint
+            # 如果是 mock 后端且模拟输入仍可用，显示快捷输入模式
+            if not mic_available and self._voice_service.backend_mode in ("mock",):
+                mode_label = "快捷输入"
+            panel.set_voice_mode(mode_label, hint)
         else:
             panel.set_mic_available(False)
+            panel.set_voice_mode("不可用", "语音服务未初始化")
 
     def _show_central_hint(self, title: str, subtitle: str = "",
                            color: str = "white"):
@@ -610,7 +619,7 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
         dlg = QDialog(self)
         dlg.setWindowTitle("使用说明")
-        dlg.setMinimumSize(520, 480)
+        dlg.setMinimumSize(520, 460)
         dlg.setStyleSheet(
             "QDialog { background-color: #0a0a1a; }"
             "QLabel { color: #d0d0e0; font-family: 'Microsoft YaHei'; }")
@@ -622,23 +631,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(title)
         text = QLabel(
             '<b>开始办公</b><br>'
-            '适合日常办公时常驻运行。AI 会观察你的坐姿与活动状态，'
-            '你可以说出身体不适，例如「我肩膀酸」「我脖子酸」「腰背僵硬」。<br><br>'
+            '日常办公时常驻运行。AI 观察你的坐姿与活动状态，'
+            '你可以说「我肩膀酸」「我脖子酸」「腰背僵硬」。<br><br>'
             '<b>开始 2 分钟放松</b><br>'
-            '适合立即进行一组结构化放松训练，系统会推荐适合当前状态的动作。<br><br>'
-            '<b>语音使用方式</b><br>'
-            '点击「语音输入」，然后说一句话；再次点击可结束录音。'
-            '可说的指令包括：「我肩膀酸」「我脖子酸」「腰背僵硬」「开始放松」「换一个动作」「结束」。'
-            '<br><br>'
-            '<b>快捷键</b><br>'
-            'F11：切换全屏<br>'
-            'ESC：返回首页<br>'
-            'R：重新开始本轮放松<br>'
-            'Q：结束本轮放松<br><br>'
-            '<b>语音与 AI</b><br>'
-            '默认本地规则识别关键词，可选配置外部 AI 理解自然表达；'
-            '不上传视频、深度图或原始音频，只传文本和结构化状态摘要。'
-            '若语音识别失败，可使用左侧快捷指令按钮。'
+            '进行一组结构化放松训练，系统推荐适合当前状态的动作。<br><br>'
+            '<b>语音输入</b><br>'
+            '点击「语音输入」后说话，再次点击结束录音。'
+            '可说的指令：「我肩膀酸」「我脖子酸」「腰背僵硬」'
+            '「开始放松」「换一个动作」「结束」。<br><br>'
+            '<b>快捷输入</b><br>'
+            '语音不可用时，点击左侧快捷指令按钮同样可以完成交互。<br><br>'
+            '<b>键盘快捷键</b><br>'
+            'ESC — 返回首页<br>'
+            'F11 — 切换全屏<br>'
+            'R — 重新开始本轮放松<br>'
+            'Q — 结束本轮放松'
         )
         text.setWordWrap(True)
         text.setStyleSheet("font-size: 14px; line-height: 1.6;")
