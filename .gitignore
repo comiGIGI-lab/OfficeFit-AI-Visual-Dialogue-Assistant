@@ -24,3 +24,6 @@ ob/
 *.mp4
 *.wav
 *.avi
+
+# Vosk model (downloaded on demand, too large for git)
+models/vosk-model-small-cn/
