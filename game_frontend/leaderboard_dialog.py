@@ -25,7 +25,7 @@ def save_leaderboard(entries):
 class LeaderboardDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('排行榜')
+        self.setWindowTitle('放松记录')
         self.setMinimumSize(500, 400)
         self.setStyleSheet("""
             QDialog { background-color: #1a1a2e; }
@@ -53,14 +53,14 @@ class LeaderboardDialog(QDialog):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        title = QLabel('🏆 排行榜 Top 20')
+        title = QLabel('OfficeFit 放松记录')
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet('font-size: 24px; font-weight: bold; color: #ffaa00;')
         layout.addWidget(title)
 
         self.table = QTableWidget()
         self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(['排名', '分数', '难度', '日期'])
+        self.table.setHorizontalHeaderLabels(['排名', '完成度', '模式', '日期'])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -73,6 +73,7 @@ class LeaderboardDialog(QDialog):
     def _refresh(self):
         entries = load_leaderboard()
         self.table.setRowCount(len(entries))
+        mode_names = {'PRACTICE': '轻松', 'NORMAL': '标准', 'HARD': '活力'}
         for i, e in enumerate(entries):
             rank = QTableWidgetItem(str(i + 1))
             rank.setTextAlignment(Qt.AlignCenter)
@@ -82,9 +83,11 @@ class LeaderboardDialog(QDialog):
             score.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(i, 1, score)
 
-            diff = QTableWidgetItem(e.get('difficulty', 'NORMAL'))
-            diff.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(i, 2, diff)
+            diff_raw = e.get('difficulty', 'NORMAL')
+            diff = mode_names.get(diff_raw.upper(), diff_raw)
+            diff_item = QTableWidgetItem(diff)
+            diff_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(i, 2, diff_item)
 
             date = QTableWidgetItem(e.get('date', ''))
             date.setTextAlignment(Qt.AlignCenter)
