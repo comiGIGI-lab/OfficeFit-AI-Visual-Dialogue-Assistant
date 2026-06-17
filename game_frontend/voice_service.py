@@ -92,6 +92,72 @@ def _match_keyword(text: str):
     return None
 
 
+# ── Vosk / 离线 ASR 常见错误修正 ─────────────────────────
+
+# 已知 Vosk 中文短指令常见同音/近音错误 → 标准词
+_ASR_PHONETIC_FIXES = {
+    # 开始放松
+    "开始放送": "开始放松", "开始方松": "开始放松", "开始放": "开始放松",
+    "开始松": "开始放松", "开始饭送": "开始放松", "开时放松": "开始放松",
+    "开始方": "开始放松", "开始放生": "开始放松", "开始方送": "开始放松",
+    # 暂停
+    "暂挺": "暂停", "站停": "暂停", "先停": "暂停", "停一下": "暂停",
+    "暂停下": "暂停", "暂定": "暂停",
+    # 继续
+    "既续": "继续", "断续": "继续", "计序": "继续",
+    # 换一个动作
+    "换一个": "换一个动作", "换个动作": "换一个动作", "换一下": "换一个动作",
+    "下一个动作": "换一个动作", "换个": "换一个动作", "换一个动做": "换一个动作",
+    "换亿个动作": "换一个动作", "换动作": "换一个动作",
+    # 结束
+    "结速": "结束", "借宿": "结束", "结数": "结束", "姐束": "结束",
+    # 肩膀症状
+    "我间帮酸": "我肩膀酸", "我肩帮酸": "我肩膀酸", "肩酸": "我肩膀酸",
+    "肩颈酸": "我肩膀酸", "肩颈紧": "我肩膀酸", "我肩酸": "我肩膀酸",
+    "我坚绑酸": "我肩膀酸", "我肩膀栓": "我肩膀酸",
+    # 脖子症状
+    "我波子酸": "我脖子酸", "我博子酸": "我脖子酸", "我泊子酸": "我脖子酸",
+    # 腰背症状
+    "腰倍僵硬": "腰背僵硬", "要背僵硬": "腰背僵硬", "腰背将应": "腰背僵硬",
+    "我腰酸": "腰背僵硬",
+    # 上半身
+    "上班身": "上半身",
+    # 全身
+    "权身": "全身", "全体": "全身",
+}
+
+# 可剥离的句尾语气词
+_SENTENCE_PARTICLES = ["啊", "吧", "呢", "的", "了", "哦", "嗯", "呀", "嘛", "哈", "哟"]
+
+
+def _normalize_common_asr_errors(text: str) -> str:
+    """修正离线 ASR（Vosk）常见同音/近音识别错误。
+
+    返回修正后的文本；如果没有匹配的修正规则，返回原文本。
+    """
+    t = text.strip()
+    if not t:
+        return t
+
+    # 精确匹配
+    if t in _ASR_PHONETIC_FIXES:
+        return _ASR_PHONETIC_FIXES[t]
+
+    # 剥离句尾语气词后再试
+    for particle in _SENTENCE_PARTICLES:
+        if t.endswith(particle) and len(t) > len(particle):
+            stripped = t[:-len(particle)]
+            if stripped in _ASR_PHONETIC_FIXES:
+                return _ASR_PHONETIC_FIXES[stripped]
+
+    # 如果文本包含已知错误片段，做部分替换（仅替换长度 >= 3 的片段，避免短词误伤）
+    for wrong, correct in _ASR_PHONETIC_FIXES.items():
+        if len(wrong) >= 3 and wrong in t:
+            t = t.replace(wrong, correct)
+
+    return t
+
+
 def _dedup_repeated_phrase(text: str) -> str:
     """去除语音识别中常见的重复/截断现象。
 
@@ -120,35 +186,70 @@ def normalize_command(text: str) -> str:
     """识别文本归一化。
 
     1. 去除重复识别（如「开始放松开始放松开」→「开始放松」）
-    2. 关键词匹配 → 标准控制指令
-    3. 身体不适等非控制语句原样返回，交给上层 intent_recognizer 处理
+    2. 修正离线 ASR 常见同音错误
+    3. 关键词匹配 → 标准控制指令
+    4. 身体不适等非控制语句原样返回，交给上层 intent_recognizer 处理
     """
     if not text:
         return ""
     t = text.strip()
     t = _dedup_repeated_phrase(t)
+    t = _normalize_common_asr_errors(t)
 
-    if any(k in t for k in ("计分挑战", "进入挑战", "开始挑战", "挑战模式",
-                             "开始游戏", "游戏模式", "体感挑战")):
+    # ── 开始放松（含常见 Vosk 误识别变体）──
+    if any(k in t for k in (
+        "开始放", "开始方", "开始练", "开始训", "开始活动", "开始运动",
+        "开始放松", "开始休息", "开始锻炼", "开始吧", "开始做",
+        "计分挑战", "进入挑战", "开始挑战", "挑战模式",
+        "开始游戏", "游戏模式", "体感挑战",
+    )):
         return "开始放松"
-    if "开始放松" in t:
-        return "开始放松"
-    if any(k in t for k in ("换一个", "下一个", "刷一个动作", "换个动作", "换动作")):
-        return "换一个动作"
-    if "暂停" in t:
+
+    # ── 暂停 ──
+    if any(k in t for k in (
+        "暂停", "暂挺", "站停", "先停", "停一下", "暂定",
+        "休息一下", "歇一下",
+    )):
         return "暂停"
-    if "继续" in t:
+
+    # ── 继续 ──
+    if any(k in t for k in (
+        "继续", "既续", "接着来", "接着做", "接着训练", "接着",
+        "继续吧", "继续训练",
+    )):
         return "继续"
-    if ("结束" in t) or ("停止" in t):
+
+    # ── 换一个动作 ──
+    if any(k in t for k in (
+        "换一个", "下一个", "刷一个动作", "换个动作", "换动作",
+        "换一下", "换个", "跳过", "下一个动作",
+    )):
+        return "换一个动作"
+
+    # ── 结束 ──
+    if any(k in t for k in (
+        "结束", "结速", "借宿", "停止训练", "停止运动",
+        "退出训练", "不做了",
+    )):
         return "结束"
-    if "上半身" in t:
+    if "停止" in t and "停止办公" not in t:
+        return "结束"
+
+    # ── 上半身 ──
+    if any(k in t for k in ("上半身", "上班身", "上半身模式", "上半身放松")):
         return "上半身"
-    if "全身" in t:
+
+    # ── 全身 ──
+    if any(k in t for k in ("全身", "全体", "权身", "全身模式", "全身放松", "全身互动")):
         return "全身"
-    if any(k in t for k in ("开始办公", "办公模式", "开始工作")):
+
+    # ── 办公 ──
+    if any(k in t for k in ("开始办公", "办公模式", "开始工作", "开启办公")):
         return "开始办公"
-    if any(k in t for k in ("结束办公", "退出办公")):
+    if any(k in t for k in ("结束办公", "退出办公", "停止办公")):
         return "结束办公"
+
+    # 其它（含身体不适）→ 原样返回，交给意图识别
     return t
 
 
