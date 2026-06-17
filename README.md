@@ -276,8 +276,13 @@ $env:OFFICEFIT_POSE_MODEL="models/pose_landmarker_full.task"
 │   ├── action_recommender.py      # 动作推荐引擎
 │   ├── action_guide.py            # 动作说明数据
 │   ├── user_state.py              # 用户状态管理
-│   ├── ai_client.py               # 外部 AI 客户端
+│   ├── ai_client.py               # 外部 AI 客户端（含 officefit_service 端云协同）
 │   └── styles.py                  # 全局暗色 QSS 主题
+│
+├── ai_service/                    # 端云协同 FastAPI 服务（可选）
+│   ├── main.py                    # FastAPI 入口：/health、/api/dialog
+│   ├── schemas.py                 # UserState / DialogRequest / DialogResponse
+│   └── workflow.py                # parse_intent/recommend/generate_reply（可选 LangGraph）
 │
 ├── scripts/                       # 工具脚本
 │   ├── check_environment.py       # 部署环境一键检查
@@ -396,6 +401,7 @@ python run_game_frontend.py
 |----------|------|
 | `OFFICEFIT_AI_PROVIDER=none` | 默认，仅使用本地规则 |
 | `OFFICEFIT_AI_PROVIDER=openai` | 启用 OpenAI API（需设置 OPENAI_API_KEY） |
+| `OFFICEFIT_AI_PROVIDER=officefit_service` | 调用自托管 OfficeFit FastAPI 服务（端云协同，见下方专节） |
 
 启用外部 AI 后，**仅上传文本与结构化状态数据，原始视频、音频、画面帧全程本地留存，不对外传输**，兼顾数据安全与带宽成本。
 
@@ -418,6 +424,64 @@ $env:OFFICEFIT_QWEN_MODEL="qwen-turbo"
 脚本仅做连通性验证，不接入主程序。支持 qwen-plus / qwen-turbo / qwen-max。
 
 > 不要将 API key 写入代码或提交到仓库。
+
+### 端云协同服务（自托管 OfficeFit AI 服务）
+
+项目内置一个最小可运行的 FastAPI 服务 `ai_service/`，用于路演演示「端云协同」架构：终端本地完成感知（相机 / YOLO / MediaPipe / 语音），仅把 **文本 + 脱敏状态摘要** 发给该服务做意图理解与动作推荐。服务工作流为 `parse_intent → recommend_actions → generate_reply`；若环境装了 `langgraph` 则用 `StateGraph` 编排，否则退化为普通函数链路（行为一致），**绝不因 langgraph 缺失而崩溃**。
+
+**只上传**（脱敏）：`user_text`、`camera_source`、`depth_available`、`current_mode`、`sitting_minutes`、`fatigue_parts`、`posture`。
+**绝不上传**：视频、深度图、原始音频。
+
+接口：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET  | `/health`    | 健康检查（含后端类型 rules / langgraph） |
+| POST | `/api/dialog`| 文本理解 + 动作推荐，返回 `{reply, intent, recommended_actions, next_mode, backend, provider}` |
+
+依赖：
+
+```bash
+pip install fastapi "uvicorn[standard]"
+```
+
+两终端运行（端云协同）：
+
+终端 1（启动 AI 服务）：
+
+```bash
+python -m uvicorn ai_service.main:app --host 127.0.0.1 --port 8000
+```
+
+终端 2（启动客户端，启用 officefit_service，Windows cmd）：
+
+```cmd
+set OFFICEFIT_AI_PROVIDER=officefit_service
+python run_game_frontend.py
+```
+
+PowerShell 等价：
+
+```powershell
+$env:OFFICEFIT_AI_PROVIDER="officefit_service"
+python run_game_frontend.py
+```
+
+可选环境变量：
+
+- `OFFICEFIT_AI_SERVICE_URL` — 服务地址，默认 `http://127.0.0.1:8000/api/dialog`
+- `OFFICEFIT_AI_SERVICE_TIMEOUT` — 调用超时（秒），默认 3
+
+**降级保证**：服务未启动 / 连接失败 / 超时 / 非 200 时，客户端 `generate_reply` 返回 `None`，主流程**自动回退到本地 `dialog_manager` 规则**（或已配置的其它外部 AI），对话不中断、不崩溃。客户端启动日志可见 `[AI] OfficeFit service client ready (...)`。
+
+自测：
+
+```bash
+python -m py_compile ai_service/*.py game_frontend/*.py
+python -m uvicorn ai_service.main:app --host 127.0.0.1 --port 8000
+# 另开终端：
+python -c "import requests; print(requests.post('http://127.0.0.1:8000/api/dialog', json={'user_text':'我肩膀酸','user_state':{'sitting_minutes':60}}).json())"
+```
 
 ---
 

@@ -7,7 +7,9 @@
 provider=none 时使用本地规则，不调用云端。
 
 环境变量:
-    OFFICEFIT_AI_PROVIDER = none | openai | qwen
+    OFFICEFIT_AI_PROVIDER       = none | openai | qwen | officefit_service
+    OFFICEFIT_AI_SERVICE_URL    = http://127.0.0.1:8000/api/dialog (officefit_service 时默认)
+    OFFICEFIT_AI_SERVICE_TIMEOUT= 3 (秒，officefit_service 调用超时)
     OPENAI_API_KEY        = sk-... (openai 时必需)
     OPENAI_BASE_URL       = https://... (可选，默认 api.openai.com)
     OPENAI_MODEL          = gpt-4o-mini (可选)
@@ -132,12 +134,109 @@ class OpenAIClient(BaseAIClient):
         }
 
 
+class OfficeFitServiceClient(BaseAIClient):
+    """端云协同服务客户端：调用本地 OfficeFit FastAPI 服务。
+
+    与其它 provider 一样实现 generate_reply(user_text, user_state) -> Optional[str]。
+    服务不可用（连接失败/超时/非 200）时返回 None，主流程会自动回退到
+    本地 dialog_manager 规则或已有外部 AI。
+
+    隐私：只上传文本与脱敏状态摘要（posture/久坐/疲劳部位/相机/深度/模式），
+    不上传视频、深度图、原始音频。
+    """
+
+    DEFAULT_URL = "http://127.0.0.1:8000/api/dialog"
+
+    def __init__(self, url: str = "", timeout: float = 3.0):
+        super().__init__()
+        self._url = (url or os.environ.get(
+            "OFFICEFIT_AI_SERVICE_URL", self.DEFAULT_URL)).strip()
+        self._timeout = timeout
+        self._available = bool(self._url)
+        self._last_error: str = ""
+        self._last_result: Optional[dict] = None
+
+    def is_available(self) -> bool:
+        return self._available
+
+    @property
+    def last_error(self) -> str:
+        return self._last_error
+
+    @property
+    def last_result(self) -> Optional[dict]:
+        """最近一次服务返回的结构化结果（供上层可选使用）。"""
+        return self._last_result
+
+    def _build_user_state(self, user_state: Optional[dict]) -> dict:
+        """从客户端状态构造脱敏摘要（只含允许上传的字段）。"""
+        s = user_state or {}
+        try:
+            sit = int(s.get("sedentary_minutes", 0) or 0)
+        except (TypeError, ValueError):
+            sit = 0
+        return {
+            "posture": str(s.get("posture", "unknown")),
+            "sitting_minutes": sit,
+            "fatigue_parts": list(s.get("fatigue_parts", []) or []),
+            "current_mode": str(s.get("current_mode", "office")),
+            "camera_source": str(s.get("camera_source", "unknown")),
+            "depth_available": bool(s.get("depth_available", False)),
+        }
+
+    def generate_reply(self, user_text: str,
+                       user_state: Optional[dict] = None) -> Optional[str]:
+        if not self._available:
+            return None
+        try:
+            import requests
+
+            payload = {
+                "user_text": user_text or "",
+                "user_state": self._build_user_state(user_state),
+            }
+            resp = requests.post(
+                self._url, json=payload, timeout=self._timeout)
+            if resp.status_code == 200:
+                data = resp.json() or {}
+                self._last_result = data
+                reply = data.get("reply")
+                if isinstance(reply, str) and reply.strip():
+                    return reply.strip()
+                return None
+            self._last_error = f"service returned {resp.status_code}"
+            return None
+        except Exception as e:
+            self._last_error = str(e)
+            return None
+
+    def get_status(self) -> dict:
+        return {
+            "provider": "officefit_service",
+            "available": self._available,
+            "source": self._source_name,
+        }
+
+
 def create_ai_client() -> BaseAIClient:
     provider = os.environ.get("OFFICEFIT_AI_PROVIDER", "").strip().lower()
 
     # 如果显式设置为 none，强制关闭
     if provider == "none":
         return NoneAIClient()
+
+    # 端云协同：调用本地 OfficeFit FastAPI 服务
+    if provider == "officefit_service":
+        url = os.environ.get("OFFICEFIT_AI_SERVICE_URL", "").strip()
+        try:
+            timeout = float(os.environ.get(
+                "OFFICEFIT_AI_SERVICE_TIMEOUT", "3") or 3)
+        except (TypeError, ValueError):
+            timeout = 3.0
+        client = OfficeFitServiceClient(url=url, timeout=timeout)
+        client._source_name = "端云协同 (OfficeFit 服务)"
+        print(f"[AI] OfficeFit service client ready ({client._url})")
+        return client
 
     # 自动检测：如果有 key 则默认启用对应 provider
     if not provider:
