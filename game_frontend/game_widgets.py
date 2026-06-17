@@ -61,6 +61,8 @@ class VideoWidget(QWidget):
             y = (self.height() - pixmap.height()) // 2
             painter.drawPixmap(x, y, pixmap)
             self._video_rect = (x, y, pixmap.width(), pixmap.height())
+        except Exception as e:
+            print(f"[UI] VideoWidget paintEvent error: {e}")
         finally:
             painter.end()
 
@@ -432,6 +434,8 @@ class CountdownOverlay(QWidget):
                 painter.setPen(color)
                 painter.drawText(0, cy - self._font_size // 2, w, self._font_size + 20,
                                Qt.AlignCenter, str(self._countdown))
+        except Exception as e:
+            print(f"[UI] CountdownOverlay paintEvent error: {e}")
         finally:
             painter.end()
 
@@ -529,6 +533,8 @@ class FloatTextWidget(QWidget):
             rect.translate(0, -2)
             painter.setPen(QColor(c.red(), c.green(), c.blue(), alpha))
             painter.drawText(rect, Qt.AlignCenter, self._text)
+        except Exception as e:
+            print(f"[UI] FloatTextWidget paintEvent error: {e}")
         finally:
             painter.end()
 
@@ -538,42 +544,47 @@ class FloatTextWidget(QWidget):
 # ── 音量条 ──────────────────────────────────────────────
 
 class VolumeBar(QWidget):
-    """小型音量指示条：0.0~1.0 RMS 音量 → 绿色条宽度"""
+    """录音音量条：原生 QProgressBar，无自定义 paintEvent。
+
+    旧版用 QPainter.drawRoundedRect 自绘，且 set_level 被 PortAudio
+    音频线程直接调用 update()，导致跨线程绘制 + backing store 损坏
+    （SystemError: PY_SSIZE_T_CLEAN / QBackingStore::endPaint active painter）。
+    现改为原生 QProgressBar，并在 GUI 线程通过 Qt 信号更新，彻底避免自绘。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._level = 0.0
-        self.setFixedHeight(6)
-        self.setMinimumWidth(80)
+        self._bar = QProgressBar()
+        self._bar.setRange(0, 100)
+        self._bar.setValue(0)
+        self._bar.setTextVisible(False)
+        self._bar.setFixedHeight(8)
+        self._bar.setStyleSheet("""
+            QProgressBar {
+                background-color: #1e1e32;
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 4px;
+            }
+            QProgressBar::chunk {
+                border-radius: 3px;
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #00c864, stop:0.6 #00ff88, stop:1 #ffc800);
+            }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._bar)
 
     def set_level(self, level: float):
-        self._level = max(0.0, min(1.0, level))
-        self.update()
-
-    def paintEvent(self, event):
-        painter = QPainter(self)
+        """更新音量（0.0~1.0 → 0~100）。数值异常时静默回退为 0，不报错。"""
         try:
-            painter.setRenderHint(QPainter.Antialiasing)
-            w, h = self.width(), self.height()
-
-            # 背景
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(30, 30, 50))
-            painter.drawRoundedRect(0, 0, w, h, 3, 3)
-
-            # 音量条
-            if self._level > 0.01:
-                bar_w = int(w * self._level)
-                if self._level < 0.3:
-                    c = QColor(0, 200, 100)    # 低音量绿
-                elif self._level < 0.6:
-                    c = QColor(0, 255, 136)    # 中音量亮绿
-                else:
-                    c = QColor(255, 200, 0)    # 高音量黄
-                painter.setBrush(c)
-                painter.drawRoundedRect(0, 0, bar_w, h, 3, 3)
-        finally:
-            painter.end()
+            v = max(0.0, min(1.0, float(level)))
+        except (TypeError, ValueError):
+            v = 0.0
+        self._level = v
+        self._bar.setValue(int(v * 100))
 
 
 # ── 动作目的与提示映射 ────────────────────────────────────
@@ -1032,6 +1043,7 @@ class AssistantPanel(QWidget):
     listen_clicked = Signal()
     simulate_command = Signal(str)  # 携带指令字符串
     mode_selected = Signal(str)     # upper_body / full_body
+    voice_level_changed = Signal(float)  # 音频线程 → GUI 线程（queued 自动跨线程）
 
     _SIM_COMMANDS = [
         "我肩膀酸", "我脖子酸", "腰背僵硬",
@@ -1169,6 +1181,8 @@ class AssistantPanel(QWidget):
         self._volume_bar = VolumeBar()
         self._volume_bar.setVisible(False)
         layout.addWidget(self._volume_bar)
+        # 音频线程通过信号把音量投递到 GUI 线程，避免跨线程操作控件
+        self.voice_level_changed.connect(self._on_voice_level)
 
         self._listen_status = QLabel(
             "点击后说一句话，再次点击可结束录音。")
@@ -1317,7 +1331,14 @@ class AssistantPanel(QWidget):
             "color: #ffaa00; font-size: 12px; font-family: 'Microsoft YaHei';")
 
     def update_voice_level(self, level: float):
-        """更新音量条（0.0~1.0）"""
+        """供音频线程调用：只 emit 信号，绝不在非 GUI 线程触碰控件。"""
+        try:
+            self.voice_level_changed.emit(float(level))
+        except (TypeError, ValueError):
+            pass
+
+    def _on_voice_level(self, level: float):
+        """GUI 线程槽：真正更新音量条。"""
         self._volume_bar.set_level(level)
 
     def set_listen_error(self, message: str):
