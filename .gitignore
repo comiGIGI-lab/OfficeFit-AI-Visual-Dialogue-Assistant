@@ -27,3 +27,9 @@ ob/
 
 # Vosk model (downloaded on demand, too large for git)
 models/vosk-model-small-cn/
+
+# web 版忽略项
+office-ai-assistant-web/.idea/
+office-ai-assistant-web/.feisuan/
+office-ai-assistant-web/intentParser_backup.js
+office-ai-assistant-web/node_modules/

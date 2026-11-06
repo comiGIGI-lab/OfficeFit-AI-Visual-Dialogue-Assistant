@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>办公放松AI助手 - MVP演示</title>
+    <!-- 引入MediaPipe的CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+    <!-- 引入我们的样式和脚本 -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>💻 办公放松AI视觉对话助手 (MVP)</h1>
+            <p class="subtitle">基于浏览器MediaPipe Pose + Web Speech API实现</p>
+        </header>
+
+        <main>
+            <!-- 左侧：视频与视觉反馈区域 -->
+            <section class="video-section">
+                <div class="video-container">
+                    <video class="input_video" id="input_video"></video>
+                    <canvas class="output_canvas" id="output_canvas"></canvas>
+                    <div class="video-overlay" id="status_overlay">
+                        <span>正在初始化摄像头...</span>
+                    </div>
+                </div>
+                <div class="video-controls">
+                    <button id="start_btn" class="btn btn-primary">🎥 启动助手</button>
+                    <button id="stop_btn" class="btn btn-secondary" disabled>⏹️ 停止</button>
+                    <button id="toggle_mic_btn" class="btn" data-listening="false">🎤 点击说话</button>
+                </div>
+                
+                <div class="camera-selector">
+                    <label for="camera_select">📷 选择摄像头：</label>
+                    <select id="camera_select" class="form-control">
+                        <option value="">正在检测摄像头...</option>
+                    </select>
+                    <small class="form-text text-muted">
+                        💡 提示：深度相机（RealSense、Kinect等）显示红外图像，请选择普通RGB摄像头
+                    </small>
+                </div>
+            </section>
+
+            <!-- 右侧：控制与信息面板 -->
+            <section class="control-panel">
+                <div class="panel-card">
+                    <h3>🤖 AI助手状态</h3>
+                    <div class="status-display">
+                        <p><strong>模式：</strong><span id="current_mode">待机中</span></p>
+                        <p><strong>坐姿时长：</strong><span id="sitting_timer">0</span> 秒</p>
+                        <p><strong>与屏幕距离：</strong><span id="distance_status">适中</span></p>
+                        <p><strong>肩颈姿态：</strong><span id="posture_status">良好</span></p>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3>💬 对话与反馈</h3>
+                    <div class="feedback-display" id="feedback_text">
+                        <p>系统已就绪。请先点击“启动助手”按钮。</p>
+                    </div>
+                    <div class="voice-controls">
+                        <p><small>尝试说：“<strong>开始放松</strong>”、“<strong>我肩膀酸</strong>”或“<strong>暂停</strong>”</small></p>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3>🎯 动作引导</h3>
+                    <div class="exercise-guide">
+                        <p id="current_exercise">暂无进行中的训练</p>
+                        <div class="progress-container">
+                            <div class="progress-bar" id="exercise_progress"></div>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button id="start_exercise_btn" class="btn btn-success" disabled>开始放松训练</button>
+                        <button id="start_game_btn" class="btn btn-info" disabled>开始小游戏</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>技术栈：MediaPipe Pose | Web Speech API | TensorFlow.js | 演示MVP v1.0</p>
+        </footer>
+    </div>
+
+    <!-- 引入我们的JavaScript文件：症状意图库 → 机器人接口模块（协议/核心/适配层） → 应用 -->
+    <script src="symptomIntentParser.js"></script>
+    <script src="robot-interface/protocol.js"></script>
+    <script src="robot-interface/core.js"></script>
+    <script src="robot-interface/web-adapter.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
